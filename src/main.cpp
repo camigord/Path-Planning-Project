@@ -9,6 +9,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 #include "spline.h"
+#include "vehicle.h"
 
 using namespace std;
 
@@ -20,25 +21,11 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
-// Checks if the SocketIO event has JSON data.
-// If there is data the JSON object in string format will be returned,
-// else the empty string "" will be returned.
-string hasData(string s) {
-  auto found_null = s.find("null");
-  auto b1 = s.find_first_of("[");
-  auto b2 = s.find_first_of("}");
-  if (found_null != string::npos) {
-    return "";
-  } else if (b1 != string::npos && b2 != string::npos) {
-    return s.substr(b1, b2 - b1 + 2);
-  }
-  return "";
-}
-
-double distance(double x1, double y1, double x2, double y2)
+double sqrt_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
 }
+
 int ClosestWaypoint(double x, double y, const vector<double> &maps_x, const vector<double> &maps_y)
 {
 
@@ -49,7 +36,7 @@ int ClosestWaypoint(double x, double y, const vector<double> &maps_x, const vect
 	{
 		double map_x = maps_x[i];
 		double map_y = maps_y[i];
-		double dist = distance(x,y,map_x,map_y);
+		double dist = sqrt_distance(x,y,map_x,map_y);
 		if(dist < closestLen)
 		{
 			closestLen = dist;
@@ -109,14 +96,14 @@ vector<double> getFrenet(double x, double y, double theta, const vector<double> 
 	double proj_x = proj_norm*n_x;
 	double proj_y = proj_norm*n_y;
 
-	double frenet_d = distance(x_x,x_y,proj_x,proj_y);
+	double frenet_d = sqrt_distance(x_x,x_y,proj_x,proj_y);
 
 	//see if d value is positive or negative by comparing it to a center point
 
 	double center_x = 1000-maps_x[prev_wp];
 	double center_y = 2000-maps_y[prev_wp];
-	double centerToPos = distance(center_x,center_y,x_x,x_y);
-	double centerToRef = distance(center_x,center_y,proj_x,proj_y);
+	double centerToPos = sqrt_distance(center_x,center_y,x_x,x_y);
+	double centerToRef = sqrt_distance(center_x,center_y,proj_x,proj_y);
 
 	if(centerToPos <= centerToRef)
 	{
@@ -127,10 +114,10 @@ vector<double> getFrenet(double x, double y, double theta, const vector<double> 
 	double frenet_s = 0;
 	for(int i = 0; i < prev_wp; i++)
 	{
-		frenet_s += distance(maps_x[i],maps_y[i],maps_x[i+1],maps_y[i+1]);
+		frenet_s += sqrt_distance(maps_x[i],maps_y[i],maps_x[i+1],maps_y[i+1]);
 	}
 
-	frenet_s += distance(0,0,proj_x,proj_y);
+	frenet_s += sqrt_distance(0,0,proj_x,proj_y);
 
 	return {frenet_s,frenet_d};
 
@@ -162,6 +149,21 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 	return {x,y};
 
+}
+
+// Checks if the SocketIO event has JSON data.
+// If there is data the JSON object in string format will be returned,
+// else the empty string "" will be returned.
+string hasData(string s) {
+  auto found_null = s.find("null");
+  auto b1 = s.find_first_of("[");
+  auto b2 = s.find_first_of("}");
+  if (found_null != string::npos) {
+    return "";
+  } else if (b1 != string::npos && b2 != string::npos) {
+    return s.substr(b1, b2 - b1 + 2);
+  }
+  return "";
 }
 
 int main() {
@@ -203,11 +205,14 @@ int main() {
 
   // Starting at lane 1
   int lane = 1;
+  double target_velocity = 49.5;
 
   // Reference velocity
   double ref_vel = 0.0;  //mph
 
-  h.onMessage([&ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  Vehicle ego = Vehicle(lane, 0.0, 6.0, 0.0, 0.0, target_velocity);
+
+  h.onMessage([&target_velocity, &ego, &ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -237,6 +242,7 @@ int main() {
           	// Previous path data given to the Planner
           	auto previous_path_x = j[1]["previous_path_x"];
           	auto previous_path_y = j[1]["previous_path_y"];
+
           	// Previous path's end s and d values
           	double end_path_s = j[1]["end_path_s"];
           	double end_path_d = j[1]["end_path_d"];
@@ -250,6 +256,20 @@ int main() {
               car_s = end_path_s;
             }
 
+            // Update Ego Vehicle position
+            ego.update(car_s, prev_size, sensor_fusion);
+            vector<double> result = ego.choose_next_state();
+            lane = int(result[0]);
+
+            double suggested_velocity = result[1];
+            if(suggested_velocity > ref_vel && ref_vel < target_velocity){
+              ref_vel += 0.224;
+            }
+            else if(suggested_velocity < ref_vel){
+              ref_vel -= 0.224;
+            }
+
+            /*
             bool too_close = False;
 
             // Find ref_v to use
@@ -259,7 +279,7 @@ int main() {
               if(d < (2+4*lane+2) && d > (2+4*lane-2)){
                 double vx = sensor_fusion[i][3];
                 double vy = sensor_fusion[i][4];
-                double check_speed = distance(0.0,0.0,vx,vy); // Velocity Magnitude
+                double check_speed = sqrt_distance(0.0,0.0,vx,vy); // Velocity Magnitude
                 double check_car_s = sensor_fusion[i][5];
 
                 check_car_s += ((double)prev_size * 0.02 * check_speed);    // Predict current position of car based on the speed it was traveling at
@@ -278,11 +298,12 @@ int main() {
             else if(ref_vel < 49.5){
               ref_vel += 0.224;
             }
+            */
 
             // List of widely spaced (x,y) waypoints, evenly spaced at 30m
             // We will later interpolate these points with a spline to fill it with more points
             vector<double> ptsx;
-            vector<double> ptsy:
+            vector<double> ptsy;
 
             // Reference x,y,yaw states
             // We will reference either to the points where the car is or at the previous path end point
@@ -343,7 +364,7 @@ int main() {
             }
 
             // Create a Spline
-            tf::spline s;
+            tk::spline s;
 
             // Set (x,y) points to the spline
             s.set_points(ptsx, ptsy);
@@ -360,7 +381,7 @@ int main() {
             // Calculate how to break up spline points so that we travel at our desired reference velocity
             double target_x = 30.0;
             double target_y = s(target_x);
-            double target_dist = distance(0.0, 0.0, target_x, target_y);
+            double target_dist = sqrt_distance(0.0, 0.0, target_x, target_y);
             double x_add_on = 0;
 
             for(int i=1; i<= 50 - prev_size; i++){
