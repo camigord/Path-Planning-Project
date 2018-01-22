@@ -205,11 +205,14 @@ int main() {
 
   // Starting at lane 1
   int lane = 1;
+
+	// Target velocity
   double target_velocity = 49.5;
 
-  // Reference velocity
+  // Reference velocity (starting velocity / current velocity)
   double ref_vel = 0.0;  //mph
 
+	// Our vehicle class
   Vehicle ego = Vehicle(lane, 0.0, 6.0, 0.0, 0.0, target_velocity);
 
   h.onMessage([&target_velocity, &ego, &ref_vel, &lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
@@ -258,10 +261,14 @@ int main() {
 
             // Update Ego Vehicle position
             ego.update(car_s, prev_size, sensor_fusion);
+
+						// Update vehicle state and get desired lane and velocity from planner
             vector<double> result = ego.choose_next_state();
             lane = int(result[0]);
 
             double suggested_velocity = result[1];
+
+						// To minimize jerk, we constraint change in velocity
             if(suggested_velocity > ref_vel && ref_vel < target_velocity){
               ref_vel += 0.224;
             }
@@ -269,36 +276,7 @@ int main() {
               ref_vel -= 0.224;
             }
 
-            /*
-            bool too_close = False;
-
-            // Find ref_v to use
-            for(int i=0; i<sensor_fusion.size(); i++){
-              // Check if car is in our lane
-              float d = sensor_fusion[i][6];
-              if(d < (2+4*lane+2) && d > (2+4*lane-2)){
-                double vx = sensor_fusion[i][3];
-                double vy = sensor_fusion[i][4];
-                double check_speed = sqrt_distance(0.0,0.0,vx,vy); // Velocity Magnitude
-                double check_car_s = sensor_fusion[i][5];
-
-                check_car_s += ((double)prev_size * 0.02 * check_speed);    // Predict current position of car based on the speed it was traveling at
-
-                // Check s values are greater than mine and s gap (is car in front of me?)
-                if((check_car_s > car_s) && ((check_car_s - car_s) < 30)){
-                  // Logic for when a car is detected in front
-                  too_close = true;
-                }
-              }
-            }
-
-            if(too_close){
-              ref_vel -= 0.224;       // around 5m/s2
-            }
-            else if(ref_vel < 49.5){
-              ref_vel += 0.224;
-            }
-            */
+						// From here, the code is very similar as the one proposed in the project walkthrough  
 
             // List of widely spaced (x,y) waypoints, evenly spaced at 30m
             // We will later interpolate these points with a spline to fill it with more points

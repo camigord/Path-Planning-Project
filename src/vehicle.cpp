@@ -25,6 +25,9 @@ Vehicle::Vehicle(int lane, double s, double d, double v, double a, double target
 
 Vehicle::~Vehicle() {}
 
+/*
+Update information given new simulator message
+*/
 void Vehicle::update(double s, int prev_size, vector<vector<double>> sensor_fusion){
     this->s = s;
     this->prev_size = prev_size;
@@ -32,7 +35,11 @@ void Vehicle::update(double s, int prev_size, vector<vector<double>> sensor_fusi
 }
 
 
+/*
+Chooses the best next_state according to state machine and cost function
+*/
 vector<double> Vehicle::choose_next_state() {
+    // Get possible states following state machine description
     vector<string> possible_successor_states = successor_states();
 
     // Keep track of the total cost of each state
@@ -44,7 +51,7 @@ vector<double> Vehicle::choose_next_state() {
 
     for(int i = 0; i < possible_successor_states.size(); i++) {
 
-      // Generate the trajectory we would follow if we choose this state
+      // Generate the trajectory we would follow if we choose this state (lane and desired speed)
       vector<double> parameters = generate_trajectory(possible_successor_states[i]);
 
       // Calculate the cost of that trajectory
@@ -57,20 +64,27 @@ vector<double> Vehicle::choose_next_state() {
     vector<float>::iterator best_cost = min_element(begin(costs), end(costs));
     int best_idx = distance(begin(costs), best_cost);
 
+    /*
+    // For debugging
     if(state.compare(possible_successor_states[best_idx]) != 0){
       cout << state << endl;
       cout << "--------------------------------------------" << endl;
     }
+    */
 
+    // Change vehicle parameters
     this->state = possible_successor_states[best_idx];
     this->lane = final_results[best_idx][0];
 
     return final_results[best_idx];
 }
 
+/*
+Cost is a function of the speed of the vehicle. The speed of the current lane and the speed of the "intended lane"
+*/
 double Vehicle::calculate_cost(string evaluated_state, vector<double> parameters){
   // Cost depends on the intended lane velocity
-  int intended_lane = parameters[0] + lane_direction[evaluated_state];
+  int intended_lane = parameters[0] + lane_direction[evaluated_state];    // Intended lane is different for PLCL, PLCR, LCL, LCR
   double intended_speed = parameters[1];
   double cost;
   double final_speed;
@@ -102,30 +116,19 @@ vector<string> Vehicle::successor_states() {
 
     states.push_back("KL");
     if(state.compare("KL") == 0) {
+      if (lane != 0) {
         states.push_back("PLCL");
+      }
+      if (lane != lanes_available-1) {
         states.push_back("PLCR");
+      }
     } else if (state.compare("PLCL") == 0) {
-        if (lane != 0) {
             states.push_back("PLCL");
             states.push_back("LCL");
-        }
     } else if (state.compare("PLCR") == 0) {
-        if (lane != lanes_available-1) {
             states.push_back("PLCR");
             states.push_back("LCR");
-        }
     }
-    /*
-    states.push_back("KL");
-    if(state.compare("KL") == 0) {
-        if (lane != 0) {
-            states.push_back("LCL");
-        }
-        if (lane != lanes_available-1) {
-            states.push_back("LCR");
-        }
-    }
-    */
     //If state is "LCL" or "LCR", then just return "KL"
     return states;
 }
